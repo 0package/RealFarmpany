@@ -3,7 +3,7 @@
 날짜: 2025년 2월 23일
 선택: 웹사이트
 
-![image.png](image.png)
+![image](https://github.com/user-attachments/assets/e012b1da-8809-4135-bb48-54bb1bd49bf2)
 
 스마트 농업 관리를 위한 대시보드로, 센서 데이터를 실시간으로 모니터링하고 장치 제어를 할 수 있는 기능을 제공합니다. 
 
