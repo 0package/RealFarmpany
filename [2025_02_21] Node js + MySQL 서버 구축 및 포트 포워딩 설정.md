@@ -1,7 +1,5 @@
 # Node.js + MySQL 서버 구축 및 포트 포워딩 설정 정리
 
-# Node.js + MySQL 서버 구축 및 포트 포워딩 설정 정리
-
 ## 1. MySQL 서버 설정 (Windows 기준)
 
 ### 1.1 MySQL 설치 및 실행
