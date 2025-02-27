@@ -1,0 +1,18 @@
+라즈베라파이 파이카메라 연결 가이드
+
+라즈베리 OS 버전: 12(Bookworm)- 인터페이스에 카메라 옵션이 사라짐(최신 OS)
+- /boot/firmware/config.txt 파일에 camera_auto_detect=0을 추가하는 방법을 찾아 시도했지만 카메라가 인식되지 않음
+● OS 버전에 맞는 카메라 옵션으로 하였고 사용하고 있는 카메라는 PiCamera Moudel 2로 auto가 아닌 legacy_camera=1로 코드를 수정함(기존 0이 아니라 1로 해야한다고 함)
+
+[Bullseye OS 이전 방식]라즈베리파이 아이콘 > Raspberry Pi Configuration > Interface > Camera(Legacy Camera) Enable
+
+라즈베리파이에서 Raspberry Pi Configuration 메뉴의 Interface 탭에 Camera 옵션이 보이지 않는 문제 발생 -> 라즈베리파이 OS의 버전이나 설정 방식이 변경됨. 라즈베리파이 OS 업데이트 이후 기존의 raspi-config에서 legacy 설정이 사라지고 새로운 방식 도입. 최신 라즈베리파이 OS(특히 Bullseye 이후)에서는 카메라 인터페이스 설정 방식이 변경됨.
+
+[Bullseye OS 이후 방식]
+
+1. 라즈베리파이 모델 및 OS 버전 확인lsb_release –a 또는 cat /etc/os-release
+2. sudo nano /boot/firmware/config.txt기존 경로는 /boot/config.txt 였지만 OS 업데이트 이후 경로도 변경됨.
+3. 파일 하단에 아래 내용을 추가/확인camera_auto_detect=1* 만약 구형 카메라(예: Pi Camera V1, V2)를 사용할 경우  legacy_camera=1
+4. 재부팅sudo reboot
+5. libcamera 확인(라즈베리파이 OS는 기본적으로 libcamera 기반으로 동작)libcamera-hello* 만약 위의 카메라 미리보기가 실행되지 않는다면 libcamera 설치sudo apt update && sudo apt install libcamera-apps
+6. 카메라 연결 확인vcgencmd get_cameradetected=1이면 카메라가 정상 인식된 상태*** 최신 라즈베리파이 OS에서 기존의 카메라 스택을 사용하지 않아 vcgencmd 명령어는 더 이상 카메라를 감지하지 못함. libcamera-hello가 정상 작동한다면 문제는 없음.
