@@ -1,6 +1,7 @@
 # 제목 없음
 
 [라즈베리파이 FastAPI 서버]
+![logo](https://github.com/user-attachments/assets/00430350-f213-42f3-9d4b-6191016a17a3)
 
 - 패키지 업데이트
 
