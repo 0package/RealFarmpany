@@ -494,32 +494,42 @@ app.post('/addFarm', (req, res) => {
 
 // 농장 삭제
 app.post('/delFarm', (req, res) => {
-  const farmIds = req.body.farm_ids;  // farm_ids 배열이 전달됨
+  const farmIds = req.body.farm_ids; // farm_ids 배열이 전달됨
 
   if (!farmIds || farmIds.length === 0) {
     return res.status(400).json({ error: '삭제할 농장 ID가 필요합니다.' });
   }
 
-  // 농장 삭제
-  const query = `DELETE FROM farms WHERE farm_id IN (?)`;
-  db.query(query, [farmIds], (err, results) => {
+  // 관련 장치 삭제
+  const deleteDevicesQuery = `DELETE FROM devices WHERE farm_id IN (?)`;
+  db.query(deleteDevicesQuery, [farmIds], (err, deviceResults) => {
     if (err) {
-      console.error('데이터 조회 오류');
+      console.error('장치 삭제 오류:', err);
       return res.status(500).json({ error: '서버 오류' });
     }
-    if (results.affectedRows === 0) {
-      return res.status(400).json({ error: '해당 농장이 DB에 존재하지 않습니다.' });
-    }
 
-    // 관련 장치 삭제
-    const deleteDevicesQuery = `DELETE FROM devices WHERE farm_id IN (?)`;
-    db.query(deleteDevicesQuery, [farmIds], (err, deviceResults) => {
+    // 관련 센서 삭제
+    const deleteSensorsQuery = `DELETE FROM sensors WHERE farm_id IN (?)`;
+    db.query(deleteSensorsQuery, [farmIds], (err, sensorResults) => {
       if (err) {
-        console.error('장치 삭제 오류');
+        console.error('센서 삭제 오류:', err);
         return res.status(500).json({ error: '서버 오류' });
       }
-      console.log('[Post /delFarm] 삭제된 농장 id: ', farmIds);
-      res.json({ success: true, message: '농장 및 관련 장치가 성공적으로 삭제되었습니다.' });
+
+      // 농장 삭제
+      const deleteFarmsQuery = `DELETE FROM farms WHERE farm_id IN (?)`;
+      db.query(deleteFarmsQuery, [farmIds], (err, farmResults) => {
+        if (err) {
+          console.error('농장 삭제 오류:', err);
+          return res.status(500).json({ error: '서버 오류' });
+        }
+        if (farmResults.affectedRows === 0) {
+          return res.status(400).json({ error: '해당 농장이 DB에 존재하지 않습니다.' });
+        }
+
+        console.log('[Post /delFarm] 삭제된 농장 id:', farmIds);
+        res.json({ success: true, message: '농장, 관련 장치 및 센서가 성공적으로 삭제되었습니다.' });
+      });
     });
   });
 });
