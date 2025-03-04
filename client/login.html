@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>로그인 / 회원가입</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            position: relative;
+            width: 400px;
+            height: 600px; /* 높이 증가 */
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .forms-container {
+            position: absolute;
+            width: 200%;
+            height: 100%;
+            display: flex;
+            transition: transform 0.6s ease-in-out;
+        }
+
+        .login-form, .signup-form {
+            width: 50%;
+            padding: 40px;
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        .input-field {
+            position: relative;
+            margin-bottom: 25px;
+        }
+
+        .input-field input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .input-field input:focus {
+            border-color: #2e7d32;
+            outline: none;
+        }
+
+        .input-field label {
+            position: absolute;
+            top: -10px;
+            left: 10px;
+            background-color: white;
+            padding: 0 5px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background-color: #2e7d32;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .btn:hover {
+            background-color: #2e7d32;
+        }
+
+        .toggle-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            background-color: #f5f5f5;
+            display: flex;
+        }
+
+        .toggle-btn {
+            flex: 1;
+            border: none;
+            background-color: transparent;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            padding: 15px 0;
+        }
+
+        .toggle-btn.active {
+            background-color: #2e7d32;
+            color: white;
+        }
+
+        .forgot-password {
+            text-align: center;
+            margin-top: 15px;
+        }
+
+        .forgot-password a {
+            color: #2e7d32;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .forgot-password a:hover {
+            text-decoration: underline;
+        }
+
+        /* 중복확인 버튼 스타일 */
+        .input-with-button {
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-with-button input {
+            flex: 1;
+        }
+
+        .check-btn {
+            padding: 0 15px;
+            background-color: #2e7d32;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .check-btn:hover {
+            background-color: #2e7d32;
+        }
+
+        /* 결과 메시지 스타일 */
+        .result-message {
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .result-message.success {
+            color: green;
+        }
+
+        .result-message.error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="forms-container">
+            <!-- 로그인 폼 -->
+            <div class="login-form">
+                <h2>로그인</h2>
+                <form>
+                    <div class="input-field">
+                        <label for="login-email">이메일</label>
+                        <input type="email" id="login-email" required>
+                    </div>
+                    <div class="input-field">
+                        <label for="login-password">비밀번호</label>
+                        <input type="password" id="login-password" required>
+                    </div>
+                    <button type="submit" class="btn" onclick="login()">로그인</button>
+                    <div class="forgot-password">
+                        <a href="#">비밀번호를 잊으셨나요?</a>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 회원가입 폼 -->
+            <div class="signup-form">
+                <h2>회원가입</h2>
+                <form id="signup-form">
+                    <div class="input-field">
+                        <label for="signup-email">이메일</label>
+                        <div class="input-with-button">
+                            <input type="email" id="signup-email" required>
+                            <button type="button" class="check-btn" onclick="checkUserId()">중복확인</button>
+                        </div>
+                        <div id="email-result" class="result-message"></div>
+                    </div>
+                    <div class="input-field">
+                        <label for="signup-name">이름</label>
+                        <div class="input-with-button">
+                            <input type="text" id="signup-name" required>
+                            <!--<button type="button" class="check-btn" onclick="checkUsername()">중복확인</button>-->
+                        </div>
+                        <div id="name-result" class="result-message"></div>
+                    </div>
+                    <div class="input-field">
+                        <label for="signup-password">비밀번호 </label>
+                        <input type="password" id="signup-password" required oninput="checkPasswordMatch()">
+                    </div>
+                    <div class="input-field">
+                        <label for="signup-confirm-password">비밀번호 확인</label>
+                        <input type="password" id="signup-confirm-password" required oninput="checkPasswordMatch()">
+                        <div id="confirm-password-result" class="result-message"></div>
+                    </div>
+                    <button id ="signupBtn" type="submit" class="btn" onclick="signup()">회원가입</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 하단 토글 버튼 -->
+        <div class="toggle-container">
+            <button class="toggle-btn active" id="login-toggle">로그인</button>
+            <button class="toggle-btn" id="signup-toggle">회원가입</button>
+        </div>
+    </div>
+
+    <script>
+        // 토글 버튼 요소 가져오기
+        const loginToggle = document.getElementById('login-toggle');
+        const signupToggle = document.getElementById('signup-toggle');
+        const formsContainer = document.querySelector('.forms-container');
+
+        // 로그인 버튼 클릭 이벤트
+        loginToggle.addEventListener('click', () => {
+            formsContainer.style.transform = 'translateX(0)';
+            loginToggle.classList.add('active');
+            signupToggle.classList.remove('active');
+        });
+
+        // 회원가입 버튼 클릭 이벤트
+        signupToggle.addEventListener('click', () => {
+            formsContainer.style.transform = 'translateX(-50%)';
+            signupToggle.classList.add('active');
+            loginToggle.classList.remove('active');
+        });
+                
+        let isUserIdChecked = false;
+        let isPasswordMatched = false;
+        let isUsernameChecked = false;
+
+        document.getElementById("signup-email").addEventListener("input", () => {
+            isUserIdChecked = false;
+            document.getElementById("email-result").textContent = "";
+            checkSignupEligibility();
+        });
+    
+        document.getElementById("signup-name").addEventListener("input", () => {
+            isUsernameChecked = false;
+            document.getElementById("name-result").textContent = "";
+            checkSignupEligibility();
+        });
+
+        async function checkUserId() {
+            const user_id = document.getElementById("signup-email").value;
+            if (!user_id) {
+                document.getElementById("email-result").textContent = "이메일을 입력하세요.";
+                document.getElementById("email-result").style.color = "red";
+                return;
+            }
+            const response = await fetch(`/check-userid?user_id=${user_id}`);
+            const data = await response.json();
+
+            if (response.ok) {
+                document.getElementById("email-result").textContent = "사용 가능한 아이디입니다.";
+                document.getElementById("email-result").style.color = "lightgreen";
+                isUserIdChecked = true;
+            } else {
+                document.getElementById("email-result").textContent = "이미 사용 중인 아이디입니다.";
+                document.getElementById("email-result").style.color = "red";
+                isUserIdChecked = false;
+            }
+            checkSignupEligibility();
+        }
+
+        function checkPasswordMatch() {
+            const password = document.getElementById("signup-password").value;
+            const confirmPassword = document.getElementById("signup-confirm-password").value;
+            const message = document.getElementById("confirm-password-result");
+
+            if (!password || !confirmPassword) {
+                message.textContent = "";
+                isPasswordMatched = false;
+            } else if (password === confirmPassword) {
+                message.textContent = "비밀번호가 일치합니다.";
+                message.style.color = "lightgreen";
+                isPasswordMatched = true;
+            } else {
+                message.textContent = "비밀번호가 일치하지 않습니다.";
+                message.style.color = "red";
+                isPasswordMatched = false;
+            }
+
+            checkSignupEligibility();
+        }
+        
+        async function checkUsername() {
+            const username = document.getElementById("signup-name").value;
+            if (!username) {
+                document.getElementById("name-result").textContent = "닉네임을 입력하세요.";
+                document.getElementById("name-result").style.color = "red";
+                return;
+            }
+            const response = await fetch(`/check-username?username=${username}`);
+            const data = await response.json();
+
+            if (response.ok) {
+                document.getElementById("name-result").textContent = "사용 가능한 닉네임입니다.";
+                document.getElementById("name-result").style.color = "lightgreen";
+                isUsernameChecked = true;
+            } else {
+                document.getElementById("name-result").textContent = "이미 사용 중인 닉네임입니다.";
+                document.getElementById("name-result").style.color = "red";
+                isUsernameChecked = false;
+            }
+            checkSignupEligibility();
+        }
+
+        function checkSignupEligibility() {
+            document.getElementById("signupBtn").disabled = !(isUserIdChecked && isUsernameChecked && isPasswordMatched);
+        }
+
+        // 로그인 요청
+        async function login() {
+            const user_id = document.getElementById("login-email").value;
+            const password = document.getElementById("login-password").value;
+        
+            const response = await fetch('/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ user_id, password })
+            });
+        
+            const data = await response.json();
+        
+            if (response.ok) {
+                // 로그인 성공 시 user_id와 JWT 토큰을 저장
+                sessionStorage.setItem('token', data.token);  
+                sessionStorage.setItem('user_id', user_id);
+                window.location.href = "farm.html";
+            } else {
+                alert(data.message || '로그인 실패');
+            }
+        }
+
+        // 회원가입 요청
+        async function signup() {
+            const user_id = document.getElementById("signup-email").value;
+            const password = document.getElementById("signup-password").value;
+            const username = document.getElementById("signup-name").value;
+            const response = await fetch('/signup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ user_id, password, username })
+            });
+
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('회원가입 성공!');
+                toggleForm(); // 가입 후 로그인 화면으로 이동
+            } else {
+                alert(data.message || '회원가입 실패');
+            }
+        }
+    </script>
+</body>
+</html>
