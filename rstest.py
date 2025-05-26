@@ -1,0 +1,93 @@
+import RPi.GPIO as GPIO
+import time
+import adafruit_dht
+import board
+import requests
+
+from local_server import cdata
+
+#init Setting
+GPIO.setmode(GPIO.BCM)     #set mode
+GPIO.setup(17, GPIO.OUT)    #RLED
+GPIO.setup(27, GPIO.OUT)   #BLED
+GPIO.setup(23, GPIO.IN)    #Temp, Humi
+GPIO.setup(21, GPIO.OUT)   #Fan
+
+dhtDevice = adafruit_dht.DHT11(board.D23)
+
+#Attributes
+changed = False
+update_data = []
+url = 'https://port-0-server-m7tucm4sab201860.sel4.cloudtype.app/sensors'
+burl = 'https://port-0-server-m7tucm4sab201860.sel4.cloudtype.app'
+
+user_id = 'user@gmail.com'
+farm_id = 1
+#Sensor Data
+
+def get_sensor_data():
+
+	#user_id = 'user@gmail.com'
+	farm_id = 1
+	temperature = 30.0
+	humidity = 70
+	#temperature = round(dhtDevice.temperature, 2)
+	#humidity = round(dhtDevice.humidity, 2)
+	soil_moisture = round(35.5,2)
+	co2 = 200
+
+	global changed
+	if temperature > 20:
+		cdata["fan"] = 1
+		changed = True
+		update_data.append("fan")
+	elif humidity > 70:
+		cdata["water"] = 1
+		changed = True
+		update_data.append("water")
+
+	print(f'Temp : {temperature}, Humi : {humidity}, CtrlChange:', changed)
+
+	return farm_id, temperature, humidity, soil_moisture, co2
+
+start_time = time.time()
+
+while True:
+
+	print("Running...")
+
+	if time.time() - start_time > 180:
+		print('Program stopped after 3minute')
+		break
+
+	farm_id, temperature, humidity, soil_moisture, co2 = get_sensor_data()
+	data = {'farm_id':farm_id, 'temperature':temperature, 'humidity':humidity, 'soil_moistue':soil_moisture, 'co2':co2}
+	try:
+		#POST Request
+		response = requests.post(url, json=data)
+		if response.status_code == 200:
+			print(f'Data Sent: {data}')
+		else:
+			print(f'Error:{response.status_code} - {response.text}')
+			print(response.text)
+	except requests.RequestException as e:
+		print(f"Network Error : {e}")
+
+	if changed:
+		for device in update_data:
+			chdata = {'user_id':user_id, 'farm_id':farm_id, 'device':device}
+			try:
+				response = requests.post(f"{burl}/devices/{device}/status", json=chdata)
+				if response.status_code == 200:
+					print(f'Data Sent: {chdata}')
+				else:
+					print(f'Error:{response.status_code} - {response.text}')
+					print(response.text)
+
+			except requests.RequestException as e:
+				print("Network Error : {e}")
+
+		update_data = []
+
+
+	time.sleep(5)
