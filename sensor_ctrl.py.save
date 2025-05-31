@@ -1,0 +1,471 @@
+import RPi.GPIO as GPIO
+import time
+from datetime import datetime
+import adafruit_dht
+import board
+import requests
+import spidev
+import math
+
+import sqlite3
+
+conn = sqlite3.connect("farm.db",check_same_thread=False)
+cursor = conn.cursor()
+
+# init Setting ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Pins
+th_pin = 4
+soil_pin = 0
+co2_pin = 0
+
+led_pin = 19
+fan_pin = 23
+cooler_pin = 24
+water_pin = 18
+heater_pin = 5
+
+#RaspberryPi Pin
+GPIO.setmode(GPIO.BCM)     #set mode
+
+#sensor
+GPIO.setup(th_pin, GPIO.IN)    #Temp, Humi
+GPIO.setup(soil_pin, GPIO.IN)  #Soil Moisture
+GPIO.setup(co2_pin, GPIO.IN)   #CO2
+#device
+GPIO.setup(led_pin, GPIO.OUT)     #LED
+GPIO.setup(fan_pin, GPIO.OUT)     #Fan
+GPIO.setup(cooler_pin, GPIO.OUT)  #Cooler
+GPIO.setup(water_pin, GPIO.OUT)   #Water
+GPIO.setup(heater_pin, GPIO.OUT)  #Heater
+
+dhtDevice = adafruit_dht.DHT11(board.D4)
+
+GPIO.output(led_pin, False)
+GPIO.output(fan_pin, False)
+GPIO.output(cooler_pin, False)
+GPIO.output(water_pin, False)
+GPIO.output(heater_pin, False)
+
+#SPI setting
+spi = spidev.SpiDev()
+spi.open(0,0)
+spi.max_speed_hz = 1000000
+
+#CO2 value setting
+R1 = 23500
+R2 = 10000
+
+cal_A = 1.703
+cal_B = 0.2677
+
+#LED value setting
+led_on_hour = 6
+led_off_hour = 22
+
+#Attributes
+changed = False
+update_data = []
+alarm_text = {'led':'None','fan':'None','cooler':'None','water':'None','heater':'None'}
+
+# Server URL #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+url = 'https://port-0-server-m7tucm4sab201860.sel4.cloudtype.app/sensors'
+burl = 'https://port-0-server-m7tucm4sab201860.sel4.cloudtype.app'
+
+# test_h/w_num #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+user_id = 'user@gmail.com'
+farm_id = 34
+
+
+# Sensor Data #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Analog-Digital Convert
+def read_adc(channel):
+    if channel < 0 or channel > 7:
+        return -1
+    adc = spi.xfer2([1, (8+channel) << 4, 0])
+    data = ((adc[1] & 3) << 8) + adc[2]
+    return data
+
+#CO2 init emf
+def measure_emf_ini(channel):
+    print("초기 EMF 측정 중 (3초 대기)...")
+    time.sleep(3)
+    emf_values = []
+    for _ in range(30):  # 약 6초 동안 측정
+        adc_val = read_adc(channel)
+        v_out = (adc_val * 3.3) / 1023
+        emf = v_out * ((R1 + R2) / R2)
+        emf_values.append(emf)
+        time.sleep(0.2)
+    emf_ini = sum(emf_values) / len(emf_values)
+    print(f"[EMF_ini] 초기 기준 전압: {emf_ini:.3f} V")
+    return emf_ini
+
+
+#WATER TIME
+def calculate_watering_time(current_moisture, target_moisture, soil_volume_ml=24000, pump_flow_ml_per_sec=33.3):
+    if current_moisture >= target_moisture:
+        return 0
+
+    required_water_ml = (soil_volume_ml * target_moisture - current_moisture) / 100
+    watering_time_sec = required_water_ml / pump_flow_ml_per_sec
+    return round(watering_time_sec, 2)
+
+#WATER PERCENT
+def moisture_percentage(adc_value, dry_value=1022, wet_value=356):
+    adc_value = max(min(adc_value, dry_value), wet_value)
+    percent = (dry_value - adc_value) * 100 / (dry_value - wet_value)
+    return round(percent, 1)
+
+#CO2 PERCENT
+def convert_to_co2(adc_value, emf_ini):
+    v_out = (adc_value * 3.3) / 1023
+    emf = v_out * ((R1 + R2) / R2)
+
+    ratio = emf / emf_ini
+    if ratio <= 0:
+        return 0
+
+    co2_ppm = math.pow(10, (cal_A - ratio) / cal_B)
+    return round(co2_ppm)
+
+
+def get_sensor_data():
+    
+    farm_id = 34
+    #temperature = float(input('Temp>'))
+    #humidity = float(input('Humi>'))
+    try:
+        temperature = round(dhtDevice.temperature, 2)
+        humidity = round(dhtDevice.temperature, 2)
+        time.sleep(2)
+    except:
+        temperature = round(dhtDevice.temperature, 2)
+        humidity = round(dhtDevice.temperature, 2)
+        time.sleep(2)
+
+    adc_soil_val = read_adc(1)
+    soil_moisture = moisture_percentage(adc_soil_val)
+    
+    
+    adc_co2_val = read_adc(0)
+    co2 = convert_to_co2(adc_co2_val, emf_ini)
+    
+    ctrl_devices(temperature, humidity, soil_moisture, co2)
+    print(f'Temp: {temperature}, Humi: {humidity}, Soil: {soil_moisture}, CO2: {co2}')
+    return farm_id, temperature, humidity, soil_moisture, co2
+
+# Control #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def ctrl_devices(temperature, humidity, soil_moisture, co2):
+    global changed
+    
+    cursor.execute('''select status, mode, duration, c_time from auto_ctrl where device = "led"''')
+    led = cursor.fetchone()
+    cursor.execute('''select status, mode, duration, c_time from auto_ctrl where device = "fan"''')
+    fan = cursor.fetchone()
+    cursor.execute('''select status, mode, duration, c_time from auto_ctrl where device = "cooler"''')
+    cooler = cursor.fetchone()
+    cursor.execute('''select status, mode, duration, c_time from auto_ctrl where device = "water"''')
+    water = cursor.fetchone()
+    cursor.execute('''select status, mode, duration, c_time from auto_ctrl where device = "heat"''')
+    heat = cursor.fetchone()
+
+
+    # 0: led, 1: fan, 2: cooler, 3: water, 4: heat
+    cursor.execute("select * from device_status where id = 0")
+    device = cursor.fetchone()
+    cursor.execute("select * from sensor_opt where id = 0")
+    opt = cursor.fetchone()
+    tmin = opt[0]
+    tmax = opt[1]
+    hmin = opt[2]
+    hmax = opt[3]
+    smin = opt[4]
+    smax = opt[5]
+    cmin = opt[6]
+    cmax = opt[7]
+    
+    #LED
+    if led[1] == 1: #auto
+        now = datetime.now()
+        current_hour = now.hour
+
+        if led_on_hour <= current_hour < led_off_hour:
+            if device[0] == 0:
+                changed = True
+                GPIO.output(led_pin, True)
+                cursor.execute("update device_status set led = 1 where id = 0")
+                conn.commit()
+                update_data.append('led')
+                alarm_text['led'] = '오전 6시led가 켜졌습니다.'
+        else:
+            if device[0] == 1:
+                chagned = True
+                GPIO.output(led_pin, False)
+                cursor.execute("update device_status set led = 0 where id = 0")
+                conn.commit()
+                update_data.append('led')
+                alarm_text['led'] = '오후 22시 led가 꺼졌습니다.'
+    else:
+        if led[0] == 0:
+            GPIO.output(led_pin, False)
+        else:
+            GPIO.output(led_pin, True)
+            
+        if time.time() - led[3] >= led[2]:
+            cursor.execute('''update auto_ctrl set mode = 1 where device = "led"''')
+            cursor.execute('''updqte auto_ctrl set duration = 0 where device = "led"''')
+            conn.commit()
+            print("led duration over, auto on!")
+    
+            
+    #WATER
+    if water[1] == 1: 
+        if soil_moisture > smin: # dry
+            if device[3] == 0: # WATER
+                changed = True
+                cursor.execute("update device_status set water = 1 where id = 0")
+                conn.commit()
+                update_data.appned('water')
+                alarm_text['water'] = ''
+                GPIO.output(water_pin, True)
+                time.sleep(8)
+                GPIO.output(water_pin, False)
+        elif soil_moisture < smax and device[3] == 1: # watery
+            if device[3] == 1:
+                changed = True
+                cursor.execute("update device_status set water = 0 where id = 0")
+                conn.commit()
+                update_data.append('water')
+                alarm_text['water'] = 'Watery'
+                GPIO.output(water_pin, False)
+    else:
+        if water[0] == 0:
+            GPIO.output(water_pin, False)
+        else:
+            GPIO.output(water_pin, True)
+            
+        if time.time() - water[3] >= water[2]:
+            cursor.execute('''update auto_ctrl set mode = 1 where device = "water"''')
+            cursor.execute('''updqte auto_ctrl set duration = 0 where device = "water"''')
+            conn.commit()
+            print("water duration over, auto on!")
+            
+            
+    #FAN        
+    if fan[1] == 1:#auto
+        if temperature > tmin or humidity > hmin or co2 > cmax:
+            if device[1] == 0: # FAN
+                changed = True
+                cursor.execute("update device_status set fan = 1 where id = 0")
+                conn.commit()
+                update_data.append('fan')
+                alarm_text['fan'] = ''
+                GPIO.output(fan_pin, True)
+            
+        elif humidity < hmax or co2 < cmin:
+            if device[1] == 1:
+                changed = True
+                cursor.execute("update device_status set fan = 0 where id = 0")
+                conn.commit()
+                update_data.append('fan')
+                alarm_text['fan'] = ''
+                GPIO.output(fan_pin, False)
+    else:
+        if fan[0] == 0:
+            GPIO.output(fan_pin, False)
+        else:
+            GPIO.output(fan_pin, True)
+            
+        if time.time() - fan[3] >= fan[2]:
+            cursor.execute('''update auto_ctrl set mode = 1 where device = "fan"''')
+            cursor.execute('''updqte auto_ctrl set duration = 0 where device = "fan"''')
+            conn.commit()
+            print("fan duration over, auto on!")
+            
+            
+    #HEAT
+    if heat[1] == 1: #auto
+        if temperature < tmin: # HEAT ON
+            if device[4] == 0:
+                changed = True
+                cursor.execute("update device_status set heat = 1 where id = 0")
+                conn.commit()
+                update_data.append('heater')
+                alarm_text['heater'] = ''
+                GPIO.output(heater_pin, True)
+        elif temperature > tmax: # HEAT OFF
+            if device[4] == 1:
+                changed = True
+                cursor.execute("update device_status set heat = 0 where id = 0")
+                conn.commit()
+                update_data.append('heater')
+                alarm_text['heater'] = ''
+                GPIO.output(heater_pin, False)
+        else: # HEAT OFF
+            if device[4] == 1:
+                changed = True
+                cursor.execute("update device_status set heat = 0 where id = 0")
+                conn.commit()
+                update_data.append('heater')
+                alarm_text['heater'] = ''
+                GPIO.output(heater_pin, False)
+    else:
+        if heat[0] == 0:
+            GPIO.output(heater_pin, False)
+        else:
+            GPIO.output(heater_pin, True)
+            
+        if time.time() - heat[3] >= heat[2]:
+            cursor.execute('''update auto_ctrl set mode = 1 where device = "heat"''')
+            cursor.execute('''updqte auto_ctrl set duration = 0 where device = "heat"''')
+            conn.commit()
+            print("heat duration over, auto on!")
+                
+                
+                
+    #COOLER
+    if cooler[1] == 1:
+        if temperature < tmin: #COOLER OFF
+            if device[2] == 1:
+                changed = True
+                cursor.execute("update device_status set cooler = 0 where id = 0")
+                conn.commit()
+                update_data.append('cooler')
+                alarm_text['cooler'] = 'Temperature So Low'
+                GPIO.output(cooler_pin, False)
+        elif temperature > tmax: #COOLER ON
+            if device[2] == 0:
+                changed = True
+                cursor.execute("update device_status set cooler = 1 where id = 0")
+                conn.commit()
+                update_data.append('cooler')
+                alarm_text['cooler'] = 'Temperature So High'
+                GPIO.output(cooler_pin, True)
+        else:
+            if device[2] == 1: #COOLER OFF
+                changed = True
+                cursor.execute("update device_status set cooler = 0 where id = 0")
+                conn.commit()
+                update_data.append('cooler')
+                alarm_text['cooler'] = ''
+                GPIO.output(cooler_pin, False)
+    else:
+        if cooler[0] == 0:
+            GPIO.output(cooler_pin, False)
+        else:
+            GPIO.output(cooler_pin, True)
+            
+        if time.time() - cooler[3] >= led[2]:
+            cursor.execute('''update auto_ctrl set mode = 1 where device = "cooler"''')
+            cursor.execute('''updqte auto_ctrl set duration = 0 where device = "cooler"''')
+            conn.commit()
+            print("cooler duration over, auto on!")
+         
+
+
+
+# SET_DEVICES(): set devices with cdata
+def set_devices():
+     # 0: led, 1: fan, 2: cooler, 3: water, 4: heat
+    cursor.execute("select * from device_status where id = 0")
+    device = cursor.fetchone()
+    
+    #LED
+    if device[0]:
+        GPIO.output(led_pin, True) #LED ON
+    else:
+        GPIO.output(led_pin, False) #LED OFF
+    
+    #FAN
+    if device[1]:
+        GPIO.output(fan_pin, True)
+        return "fan"
+    else:
+        GPIO.output(fan_pin, False)
+        
+    #COOLER
+    if device[2]:
+        return "cooler on"
+        #GPIO.output() #LED ON
+    else:
+        GPIO.output() #LED OFF
+        return "cooler off"
+        
+    #WATER
+    if device[3]:
+        GPIO.output() #WATER ON
+        time.sleep(8)
+        return "water on"
+        GPIO.output()
+    else:
+        GPIO.output() #LED OFF
+        return "water off"
+        
+    #HEATER
+    if device[4]:
+        GPIO.output() #LED ON
+        return "heater on"
+    else:
+        #GPIO.output() #LED OFF
+        return "heater off"
+        
+    print("Complete setting Devices")
+
+# Test #~~~~~~~~~~~~~~~~~~~~~~~
+#start_time = time.time()
+
+emf_ini = measure_emf_ini(1)
+while True:
+    print("Running...")
+    time.sleep(5)
+    cursor.execute('''select farm_id from farm_info where  id = 0''')
+    run_state = cursor.fetchone()
+    
+    if run_state[0] != 0:
+        #if time.time() - start_time > 180:
+        #    print('Program stopped after 3 minutes')
+        #    break
+ 
+        farm_id, temperature, humidity, soil_moisture, co2 = get_sensor_data()
+        data = {'farm_id':farm_id, 'temperature':temperature, 'humidity':humidity, 'soil_moisture':soil_moisture, 'co2':co2}
+        #set_devices()
+        ctrl_devices(temperature, humidity, soil_moisture, co2)
+        #try:
+        #    #POST Request
+        #    response = requests.post(url, json=data)
+        #    if response.status_code == 200:
+        #        print(f'Data Sent: {data}')
+        #    else:
+        #        print(f'Error:{response.status_code} - {response.text}')
+        #        print(response.text)
+        #except requests.RequestException as e:
+        #    print(f'Network Error : {e}')
+        #except KeyboardInterrupt:
+        #    GPIO.cleanup()
+        #    break
+
+        if changed:
+            for device in update_data:
+                cursor.execute(f"select {device} from device_status where id = 0")
+                cdata = cursor.fetchone()
+                chdata = {'farm_id':farm_id, 'device':device, 'status':cdata[0], 'content':alarm_text[device]}, 
+                #try:
+                #    response = requests.post(f'{burl}/devices/{device}/status',json=chdata)
+                #    if response.status_code == 200:
+                #        print(f'Data Sent: {chdata}')
+                #    else:
+                #        print(f'Error:{response.status_code} - {response.text}')
+                #except requests.RequestException as e:
+                #    print(f'Network Error : {e}')
+                
+            update_data = []
+            changed = False
+        
+    
+                
+    time.sleep(1)
+
+
+GPIO.cleanup

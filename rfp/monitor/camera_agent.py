@@ -16,7 +16,7 @@ class CameraAgent(metaclass=Singleton):
         )
         self.camera.configure(self.camera_still_config)
         self.camera.start()
-        time.sleep(2)
+        time.sleep(1)
 
     def capture(self, is_bytearray=True):
         captured = self.camera.capture_image('main')

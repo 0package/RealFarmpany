@@ -1,3 +1,8 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from rfp.monitor.camera_agent import CameraAgent
+import logging
+
 import argparse
 import glob
 import importlib
@@ -5,7 +10,11 @@ import os
 import uvicorn
 import requests
 import sqlite3
+from datetime import datetime
+import requests
+import time
 
+logging.getLogger("picamera2").setLevel(logging.WARNING)
 # SQL #############################################################################################################
 #connect db
 conn = sqlite3.connect("farm.db",check_same_thread=False)
@@ -15,10 +24,18 @@ cursor.execute('''
 create table if not exists farm_info(
     id integer primary key,
     farm_id integer,
-    plant text,
-    auto integer,
-    duration integer
+    plant text
 )               
+''')
+
+cursor.execute('''
+create table if not exists auto_ctrl(
+    device text primary key,
+    status integer,
+    mode integer,
+    duration integer,
+    c_time datetime default current_timestamp
+)
 ''')
 
 cursor.execute('''
@@ -28,7 +45,7 @@ create table if not exists device_status(
     fan integer,
     cooler integer,
     water integer,
-    heat integer
+    heater integer
 )
 ''')
 
@@ -50,8 +67,13 @@ create table if not exists sensor_opt(
 #init tables
 cursor.execute("select count(*) from device_status")
 if cursor.fetchone()[0] == 0:
-    cursor.execute("insert into farm_info (id, farm_id, auto, duration) values (0,34,1,0)")
-    cursor.execute("insert into device_status (id, led, fan, cooler, water, heat) values (0,0,0,0,0,0)")
+    cursor.execute('''insert into farm_info (id, farm_id, plant) values (0,0,"none")''')
+    cursor.execute('''insert into auto_ctrl (device,status, mode, duration) values ("led", 0, 1, 0)''')
+    cursor.execute('''insert into auto_ctrl (device,status, mode, duration) values ("fan", 0, 1, 0)''')
+    cursor.execute('''insert into auto_ctrl (device,status, mode, duration) values ("cooler", 0, 1, 0)''')
+    cursor.execute('''insert into auto_ctrl (device,status, mode, duration) values ("water", 0, 1, 0)''')
+    cursor.execute('''insert into auto_ctrl (device,status, mode, duration) values ("heater", 0, 1, 0)''')
+    cursor.execute("insert into device_status (id, led, fan, cooler, water, heater) values (0,0,0,0,0,0)")
     cursor.execute("insert into sensor_opt (id, tmin, tmax, hmin, hmax, cmin, cmax, smin, smax) values (0, 15,20,60,70,65,80,800,1200)")
     conn.commit()
     
@@ -67,11 +89,8 @@ url = "https://port-0-server-m7tucm4sab201860.sel4.cloudtype.app"
 #control devices status
 cdata = {"led":0, "fan":0, "cooler":0, "water":0, "heater":0}
 
-
-
-
 #user_id = "user@gmail.com"
-farm_id = 34
+#farm_id = 34
 
 
 # Create App ################################################################
@@ -95,6 +114,14 @@ if __name__ == '__main__':
     print(f"module_name : {module_name}")
     module = importlib.import_module(module_name)
     app =  getattr(module, 'create_app')()
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # API #######################################################################
 
@@ -119,34 +146,40 @@ if __name__ == '__main__':
     @app.post("/update")
     def update_status(update: dict):
         print('sign onononon')
-        global farm_id
+        cursor.execute("select farm_id from farm_info where id = 0")
+        farm = cursor.fetchone()
+        farm_id = farm[0]
         changed={}
-        if update["farm_id"] == farm_id:
+        print("update", update)
+        print('farm_id', update["farm_id"])
+        print('myfarm_Id', farm_id)
+        u_farm_id = int(update["farm_id"])
+        print(u_farm_id, type(u_farm_id))
+        if u_farm_id == farm_id:
             print("it's you")
-            cursor.execute("update farm_info set auto = 0 where id = 0")
-            conn.commit()
-            cursor.execute("select auto from farm_info where id = 0")
-            print("auto:",cursor.fetchone())
+            
             chkey = update["devices"]
             value = update["status"]
             duration = update["duration"]
-            cursor.execute(f"update farm_info set duration = {duration} where id = 0")
+            cursor.execute('''update auto_ctrl set duration = ? where device = ?''',(duration, chkey))
+            cursor.execute('''update auto_ctrl set mode = 0 where device = ?''', (chkey,))
+            cursor.execute('''update auto_ctrl set status = ? where device = ?''',(value, chkey))
             conn.commit()
-            cursor.execute(f"select {chkey} from device_status where id = 0")
+            cursor.execute(f'''select {chkey} from device_status where id = 0''')
             res = cursor.fetchone()
-            
+            print("chkey", chkey, type(chkey))
             if res[0] != value:
-                cursor.execute(f"update device_status set {chkey} = {value} where id = 0")
+                cursor.execute(f'''update device_status set {chkey} = {value} where id = 0''')
                 conn.commit()
                 changed[chkey] = value
 
-            if changed:
-                try:
-                    requests.post(url, json=changed)
-                except requests.exceptions.RequestException as e:
-                    print(f"Node server failed: {e}")
+           # if changed:
+           #     try:
+           #         requests.post(url, json=changed)
+           #     except requests.exceptions.RequestException as e:
+           #         print(f"Node server failed: {e}")
 
-            return {"message":"Updated", "changed":changed}
+           # return {"message":"Updated", "changed":changed}
         else:
             print("who are you?")
 
@@ -167,11 +200,11 @@ if __name__ == '__main__':
         cursor.execute("update sensor_opt set tmin = ? where id = 0", (tminmax["optimal_min"],))
         cursor.execute("update sensor_opt set tmax = ? where id = 0", (tminmax["optimal_max"],))
         cursor.execute("update sensor_opt set hmin = ? where id = 0", (hminmax["optimal_min"],))
-        cursor.execute("update sensor_opt set hmax = ? where id = 0", (hminmax["optimal_min"],))
+        cursor.execute("update sensor_opt set hmax = ? where id = 0", (hminmax["optimal_max"],))
         cursor.execute("update sensor_opt set smin = ? where id = 0", (sminmax["optimal_min"],))
-        cursor.execute("update sensor_opt set smax = ? where id = 0", (sminmax["optimal_min"],))
+        cursor.execute("update sensor_opt set smax = ? where id = 0", (sminmax["optimal_max"],))
         cursor.execute("update sensor_opt set cmin = ? where id = 0", (cminmax["optimal_min"],))
-        cursor.execute("update sensor_opt set cmax = ? where id = 0", (cminmax["optimal_min"],))
+        cursor.execute("update sensor_opt set cmax = ? where id = 0", (cminmax["optimal_max"],))
         conn.commit()
 
         return {"message":"good", "t":tminmax, "h":hminmax, "s":sminmax, "c":cminmax}
@@ -179,19 +212,57 @@ if __name__ == '__main__':
 # sensor min-max value changed
     @app.post("/level")
     def update_level(update: dict):
-        cursor.execute("update device_status set tmin = ?", (update["temperature"]["optimal_min"],))
-        cursor.execute("update device_status set tmax = ?", (update["temperature"]["optimal_max"],))
-        cursor.execute("update device_status set hmin = ?", (update["humidity"]["optimal_min"],))
-        cursor.execute("update device_status set hmax = ?", (update["humidity"]["optimal_max"],))
-        cursor.execute("update device_status set smin = ?", (update["soil_moisture"]["optimal_min"],))
-        cursor.execute("update device_status set smax = ?", (update["soil_moisture"]["optimal_max"],))
-        cursor.execute("update device_status set cmin = ?", (update["co2"]["optimal_min"],))
-        cursor.execute("update device_status set cmax = ?", (update["co2"]["optimal_max"],))
-       
+        cursor.execute("update sensor_opt set tmin = ?", (update["temperature"]["optimal_min"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set tmax = ?", (update["temperature"]["optimal_max"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set hmin = ?", (update["humidity"]["optimal_min"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set hmax = ?", (update["humidity"]["optimal_max"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set smin = ?", (update["soil_moisture"]["optimal_min"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set smax = ?", (update["soil_moisture"]["optimal_max"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set cmin = ?", (update["co2"]["optimal_min"],))
+        conn.commit()
+        cursor.execute("update sensor_opt set cmax = ?", (update["co2"]["optimal_max"],))
         conn.commit()
         return {"message": "update level"}
 
+    camera_agent = CameraAgent()
+    #send-image
+    @app.get("/get-image")
+    async def get_image(farmId:int):
+        print(farmId)
 
+        try:
+            img_bytes = camera_agent.capture()
+        except Exception as e:
+            print(f"카메라 에러:{e}")
+            return {"error": "fail to capture"}
+
+        url = f"https://port-0-server-m7tucm4sab201860.sel4.cloudtype.app/upload-image?farmId={farmId}"
+        #filename = "capture_img.jpg"
+        files = {'file':('capture.jpg', img_bytes,'image/jpeg')}
+
+        try:
+            response = requests.post(url, files=files)
+            print('response.status_code',response.satus_code)
+            return {"status":"uploaded", 'code':response.status_code}
+        except Exception as e:
+            return {'error':'fail to upload'}
+        #ret = os.system(f"libcamera-still -o {filename} --width 1280 --height 720 --nopreview --timeout 1000")
+        #print(f"libcamera-still : {ret}")
+        time.sleep(2)
+        #try:
+        #    with open(filename, 'rb') as f:
+        #        files = {'file':(filename, f, 'image/jpeg')}
+        #        response = requests.post(url, files=files)
+        #        print(f"codes: {response.status_code}")
+        #except FileNotFoundError:
+        #    print(f"file not found: {filename}")
+        
 
     reload = True if args.no_reload is None else False
 
