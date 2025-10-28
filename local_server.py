@@ -164,6 +164,7 @@ if __name__ == '__main__':
             cursor.execute('''update auto_ctrl set duration = ? where device = ?''',(duration, chkey))
             cursor.execute('''update auto_ctrl set mode = 0 where device = ?''', (chkey,))
             cursor.execute('''update auto_ctrl set status = ? where device = ?''',(value, chkey))
+            cursor.execute('''update auto_ctrl set c_time = ? where device = ?''', (datetime.now(), chkey))
             conn.commit()
             cursor.execute(f'''select {chkey} from device_status where id = 0''')
             res = cursor.fetchone()
